@@ -1,0 +1,10 @@
+Student_ID,Name,Age,Gender,CGPA,Internship,City,Join_Date
+S001,Arun,21,Male,8.2,Yes,Trivandrum,2024-06-10
+S002,Meera,22,female,7.8,No,Kochi,2024-07-15
+S003,Rahul,,MALE,8.5,Yes,Trivandrum,2024-06-20
+S004,Anjali,23,Female,,Yes,Kochi,2024-08-01
+S005,Arun,21,male,8.2,Yes,Trivandrum,2024-06-10
+S005,Arun,21,male,8.2,Yes,Trivandrum,2024-06-10
+S006,John,45,Male,9.1,No,Kollam,2024-09-12
+S007,Diya,22,FEMALE,7.5,No,Trivandrum,2024-10-05
+S008,Amal,21,Male,3.2,Yes,kochi,2024-11-11
