@@ -1,9 +1,11 @@
 
 import pandas as pd
 
+from src.detection.column_types import infer_semantic_type
+
 
 def profile_dataset(df: pd.DataFrame) -> dict:
-    """Generate a basic profile of a tabular dataset."""
+    #Generate a basic profile with semantic column inference.
 
     if not isinstance(df, pd.DataFrame):
         raise TypeError("Input must be a pandas DataFrame.")
@@ -22,8 +24,9 @@ def profile_dataset(df: pd.DataFrame) -> dict:
 
     for column in df.columns:
         series = df[column]
+        column_name = str(column)
 
-        column_profiles[str(column)] = {
+        column_profile = {
             "dtype": str(series.dtype),
             "missing_count": int(missing_counts[column]),
             "missing_percentage": float(
@@ -32,10 +35,16 @@ def profile_dataset(df: pd.DataFrame) -> dict:
             "unique_count": int(series.nunique()),
         }
 
+        column_profile.update(
+            infer_semantic_type(series, column_name)
+        )
+
         if pd.api.types.is_numeric_dtype(series):
-            column_profiles[str(column)]["statistics"] = (
+            column_profile["statistics"] = (
                 series.describe().to_dict()
             )
+
+        column_profiles[column_name] = column_profile
 
     profile = {
         "row_count": int(row_count),

@@ -39,3 +39,30 @@ def test_profile_rejects_non_dataframe():
 def test_profile_rejects_empty_dataframe():
     with pytest.raises(ValueError, match="empty dataset"):
         profile_dataset(pd.DataFrame())
+
+
+def test_profile_includes_semantic_types():
+    df = pd.DataFrame({
+        "Age": [20, 25, 30],
+        "City": ["Kochi", "Trivandrum", "Kochi"],
+        "Join_Date": [
+            "2025-01-10",
+            "2025-02-15",
+            "2025-03-20",
+        ],
+    })
+
+    profile = profile_dataset(df)
+
+    assert (
+        profile["columns"]["Age"]["semantic_type"]
+        == "numerical"
+    )
+    assert (
+        profile["columns"]["City"]["semantic_type"]
+        == "categorical"
+    )
+    assert (
+        profile["columns"]["Join_Date"]["semantic_type"]
+        == "datetime_candidate"
+    )
