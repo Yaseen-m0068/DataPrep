@@ -56,3 +56,27 @@ def test_empty_column():
     result = infer_semantic_type(series, "Unknown")
 
     assert result["semantic_type"] == "unknown"
+
+
+def test_numeric_identifier_name():
+    series = pd.Series([1001, 1002, 1003])
+
+    result = infer_semantic_type(series, "Customer_ID")
+
+    assert result["semantic_type"] == "identifier"
+
+
+def test_date_name_with_unparseable_values():
+    series = pd.Series(["unknown", "not available", "pending"])
+
+    result = infer_semantic_type(series, "Join_Date")
+
+    assert result["semantic_type"] == "datetime_candidate"
+
+
+def test_repeated_boolean_values():
+    series = pd.Series(["Yes", "No", "Yes", "Yes", "No"])
+
+    result = infer_semantic_type(series, "Active")
+
+    assert result["semantic_type"] == "boolean_candidate"
