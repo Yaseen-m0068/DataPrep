@@ -5,6 +5,7 @@ import pytest
 from src.detection.issues import (
     detect_missing_values,
     detect_duplicate_rows,
+    detect_all_issues,
 )
 
 
@@ -74,3 +75,26 @@ def test_duplicate_detection_rejects_non_dataframe():
 def test_duplicate_detection_rejects_empty_dataframe():
     with pytest.raises(ValueError, match="empty dataset"):
         detect_duplicate_rows(pd.DataFrame())
+
+
+def test_detect_all_issues():
+    df = pd.DataFrame({
+        "Age": [20, None, 25, 25],
+        "City": ["Kochi", "Kochi", "Trivandrum", "Trivandrum"],
+    })
+
+    issues = detect_all_issues(df)
+
+    issue_types = {issue["issue_type"] for issue in issues}
+
+    assert "missing_values" in issue_types
+    assert "duplicate_rows" in issue_types
+
+
+def test_detect_all_issues_on_clean_data():
+    df = pd.DataFrame({
+        "Age": [20, 25, 30],
+        "City": ["Kochi", "Trivandrum", "Kollam"],
+    })
+
+    assert detect_all_issues(df) == []

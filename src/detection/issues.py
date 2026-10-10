@@ -65,3 +65,13 @@ def detect_duplicate_rows(df: pd.DataFrame) -> list[dict]:
             f"{duplicate_count} exact duplicate row(s) found."
         ),
     }]
+
+
+def detect_all_issues(df: pd.DataFrame) -> list[dict]:
+    """Run all available data quality detectors."""
+    issues = []
+
+    issues.extend(detect_missing_values(df))
+    issues.extend(detect_duplicate_rows(df))
+
+    return issues
