@@ -6,6 +6,7 @@ from src.detection.issues import (
     detect_missing_values,
     detect_duplicate_rows,
     detect_all_issues,
+    detect_inconsistent_categories,
 )
 
 
@@ -98,3 +99,46 @@ def test_detect_all_issues_on_clean_data():
     })
 
     assert detect_all_issues(df) == []
+
+
+def test_detect_inconsistent_categories():
+    df = pd.DataFrame({
+        "Gender": ["Male", "male", "MALE", "Female"],
+    })
+
+    issues = detect_inconsistent_categories(df)
+
+    assert len(issues) == 1
+    assert issues[0]["issue_type"] == "inconsistent_categories"
+    assert issues[0]["column"] == "Gender"
+    assert issues[0]["count"] == 3
+    assert issues[0]["variants"] == [["MALE", "Male", "male"]]
+
+
+def test_detect_whitespace_inconsistency():
+    df = pd.DataFrame({
+        "City": ["Kochi", " Kochi", "Trivandrum"],
+    })
+
+    issues = detect_inconsistent_categories(df)
+
+    assert len(issues) == 1
+    assert issues[0]["variants"] == [[" Kochi", "Kochi"]]
+
+
+def test_no_inconsistent_categories():
+    df = pd.DataFrame({
+        "City": ["Kochi", "Trivandrum", "Kollam"],
+    })
+
+    assert detect_inconsistent_categories(df) == []
+
+
+def test_inconsistent_category_detection_rejects_non_dataframe():
+    with pytest.raises(TypeError):
+        detect_inconsistent_categories(["Male", "male"])
+
+
+def test_inconsistent_category_detection_rejects_empty_dataframe():
+    with pytest.raises(ValueError, match="empty dataset"):
+        detect_inconsistent_categories(pd.DataFrame())
