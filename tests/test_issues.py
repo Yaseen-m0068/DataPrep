@@ -7,6 +7,7 @@ from src.detection.issues import (
     detect_duplicate_rows,
     detect_all_issues,
     detect_inconsistent_categories,
+    detect_numeric_outliers
 )
 
 
@@ -142,3 +143,62 @@ def test_inconsistent_category_detection_rejects_non_dataframe():
 def test_inconsistent_category_detection_rejects_empty_dataframe():
     with pytest.raises(ValueError, match="empty dataset"):
         detect_inconsistent_categories(pd.DataFrame())
+
+
+def test_detect_numeric_outliers():
+    df = pd.DataFrame({
+        "Score": [10, 12, 13, 14, 100],
+    })
+
+    issues = detect_numeric_outliers(df)
+
+    assert len(issues) == 1
+    assert issues[0]["issue_type"] == "numeric_outliers"
+    assert issues[0]["column"] == "Score"
+    assert issues[0]["outlier_values"] == [100]
+    assert issues[0]["method"] == "IQR"
+
+
+def test_no_numeric_outliers():
+    df = pd.DataFrame({
+        "Score": [10, 11, 12, 13, 14],
+    })
+
+    assert detect_numeric_outliers(df) == []
+
+
+def test_numeric_outlier_detection_skips_identifiers():
+    df = pd.DataFrame({
+        "Customer_ID": [1001, 1002, 1003, 1004, 1005],
+    })
+
+    assert detect_numeric_outliers(df) == []
+
+
+def test_numeric_outlier_detection_skips_small_samples():
+    df = pd.DataFrame({
+        "Score": [10, 12, 13],
+    })
+
+    assert detect_numeric_outliers(df) == []
+
+
+def test_numeric_outlier_detection_rejects_non_dataframe():
+    with pytest.raises(TypeError):
+        detect_numeric_outliers([10, 12, 13, 100])
+
+
+def test_numeric_outlier_detection_rejects_empty_dataframe():
+    with pytest.raises(ValueError, match="empty dataset"):
+        detect_numeric_outliers(pd.DataFrame())
+
+
+def test_value_on_upper_iqr_boundary_is_not_outlier():
+    df = pd.DataFrame({
+        "Score": [8.2, 7.8, 8.5, 8.2, 8.2, 9.1, 7.5, 3.2],
+    })
+
+    issues = detect_numeric_outliers(df)
+
+    assert len(issues) == 1
+    assert issues[0]["outlier_values"] == [3.2]

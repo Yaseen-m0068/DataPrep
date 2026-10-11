@@ -1,5 +1,7 @@
 
 import pandas as pd
+import numpy as np
+from src.detection.column_types import infer_semantic_type
 
 def detect_missing_values(df: pd.DataFrame) -> list[dict]:
     #Report columns containing missing values without modifying data.
@@ -74,6 +76,7 @@ def detect_all_issues(df: pd.DataFrame) -> list[dict]:
     issues.extend(detect_missing_values(df))
     issues.extend(detect_duplicate_rows(df))
     issues.extend(detect_inconsistent_categories(df))
+    issues.extend(detect_numeric_outliers(df))
 
     return issues
 
@@ -133,5 +136,68 @@ def detect_inconsistent_categories(df: pd.DataFrame) -> list[dict]:
                     f"found in '{column}'."
                 ),
             })
+
+    return issues
+
+
+def detect_numeric_outliers(df: pd.DataFrame) -> list[dict]:
+    #Flag potential numerical outliers using the IQR method.
+    if not isinstance(df, pd.DataFrame):
+        raise TypeError("Input must be a pandas DataFrame.")
+
+    if df.empty:
+        raise ValueError("Cannot detect issues in an empty dataset.")
+
+    issues = []
+
+    for column in df.columns:
+        if not pd.api.types.is_numeric_dtype(df[column]):
+            continue
+
+        semantic = infer_semantic_type(df[column], str(column))
+
+        # Avoid treating numeric identifiers as measurements.
+        if semantic["semantic_type"] == "identifier":
+            continue
+
+        values = df[column].dropna()
+
+        # Avoid unreliable IQR estimates on very small samples.
+        if len(values) < 4:
+            continue
+
+        q1 = values.quantile(0.25)
+        q3 = values.quantile(0.75)
+        iqr = q3 - q1
+
+        lower_bound = q1 - 1.5 * iqr
+        upper_bound = q3 + 1.5 * iqr
+
+        tolerance = 1e-9
+
+        outliers = values[
+            (values < lower_bound - tolerance) | (values > upper_bound + tolerance)
+        ]
+
+        if outliers.empty:
+            continue
+
+        issues.append({
+            "issue_type": "numeric_outliers",
+            "column": str(column),
+            "count": int(len(outliers)),
+            "percentage": round(
+                len(outliers) / len(values) * 100, 2
+            ),
+            "severity": "low",
+            "outlier_values": outliers.tolist(),
+            "lower_bound": round(float(lower_bound), 4),
+            "upper_bound": round(float(upper_bound), 4),
+            "method": "IQR",
+            "description": (
+                f"{len(outliers)} potential outlier(s) found "
+                f"in '{column}' using the IQR method."
+            ),
+        })
 
     return issues
