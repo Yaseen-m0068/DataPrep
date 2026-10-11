@@ -2,7 +2,7 @@
 import pandas as pd
 
 from src.detection.column_types import infer_semantic_type
-
+from src.detection.issues import detect_all_issues
 
 def profile_dataset(df: pd.DataFrame) -> dict:
     #Generate a basic profile with semantic column inference.
@@ -47,13 +47,13 @@ def profile_dataset(df: pd.DataFrame) -> dict:
         column_profiles[column_name] = column_profile
 
     profile = {
-        "row_count": int(row_count),
-        "column_count": int(column_count),
-        "duplicate_rows": int(df.duplicated().sum()),
-        "memory_usage_bytes": int(
-            df.memory_usage(deep=True).sum()
-        ),
-        "columns": column_profiles,
+    "row_count": int(row_count),
+    "column_count": int(column_count),
+    "duplicate_rows": int(df.duplicated().sum()),
+    "memory_usage_bytes": int(df.memory_usage(deep=True).sum()),
+    "columns": column_profiles,
+    "quality_issues": detect_all_issues(df),
+
     }
 
     return profile

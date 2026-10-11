@@ -66,3 +66,20 @@ def test_profile_includes_semantic_types():
         profile["columns"]["Join_Date"]["semantic_type"]
         == "datetime_candidate"
     )
+
+
+def test_profile_includes_quality_issues():
+    df = pd.DataFrame({
+        "Age": [20, None, 25, 25],
+        "City": ["Kochi", "Kochi", "Trivandrum", "Trivandrum"],
+    })
+
+    profile = profile_dataset(df)
+
+    issue_types = {
+        issue["issue_type"]
+        for issue in profile["quality_issues"]
+    }
+
+    assert "missing_values" in issue_types
+    assert "duplicate_rows" in issue_types
