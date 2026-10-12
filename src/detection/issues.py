@@ -77,6 +77,7 @@ def detect_all_issues(df: pd.DataFrame) -> list[dict]:
     issues.extend(detect_duplicate_rows(df))
     issues.extend(detect_inconsistent_categories(df))
     issues.extend(detect_numeric_outliers(df))
+    issues.extend(detect_constant_columns(df))
 
     return issues
 
@@ -199,5 +200,46 @@ def detect_numeric_outliers(df: pd.DataFrame) -> list[dict]:
                 f"in '{column}' using the IQR method."
             ),
         })
+
+    return issues
+
+
+def detect_constant_columns(df: pd.DataFrame) -> list[dict]:
+    #Report columns with one distinct non-missing value.
+    if not isinstance(df, pd.DataFrame):
+        raise TypeError("Input must be a pandas DataFrame.")
+
+    if df.empty:
+        raise ValueError("Cannot detect issues in an empty dataset.")
+
+    issues = []
+
+    for column in df.columns:
+        values = df[column].dropna()
+
+        # Ignore columns that contain no observed values.
+        if values.empty:
+            continue
+
+        unique_count = int(values.nunique())
+
+        if unique_count == 1:
+            constant_value = str(values.iloc[0])
+            affected_count = len(values)
+
+            issues.append({
+                "issue_type": "constant_column",
+                "column": str(column),
+                "count": affected_count,
+                "percentage": round(
+                    affected_count / len(df) * 100, 2
+                ),
+                "severity": "low",
+                "constant_value": constant_value,
+                "description": (
+                    f"Column '{column}' has only one distinct "
+                    f"non-missing value: {constant_value!r}."
+                ),
+            })
 
     return issues

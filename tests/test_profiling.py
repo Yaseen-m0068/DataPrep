@@ -83,3 +83,22 @@ def test_profile_includes_quality_issues():
 
     assert "missing_values" in issue_types
     assert "duplicate_rows" in issue_types
+
+
+def test_profile_includes_constant_column_issues():
+    df = pd.DataFrame({
+        "Country": ["India", "India", "India", "India"],
+        "Score": [10, 20, 30, 40],
+    })
+
+    profile = profile_dataset(df)
+
+    constant_issues = [
+        issue
+        for issue in profile["quality_issues"]
+        if issue["issue_type"] == "constant_column"
+    ]
+
+    assert len(constant_issues) == 1
+    assert constant_issues[0]["column"] == "Country"
+    assert constant_issues[0]["constant_value"] == "India"

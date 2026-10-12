@@ -7,7 +7,8 @@ from src.detection.issues import (
     detect_duplicate_rows,
     detect_all_issues,
     detect_inconsistent_categories,
-    detect_numeric_outliers
+    detect_numeric_outliers,
+    detect_constant_columns,
 )
 
 
@@ -202,3 +203,65 @@ def test_value_on_upper_iqr_boundary_is_not_outlier():
 
     assert len(issues) == 1
     assert issues[0]["outlier_values"] == [3.2]
+
+
+def test_detect_constant_string_column():
+    df = pd.DataFrame({
+        "Country": ["India", "India", "India", "India"],
+    })
+
+    issues = detect_constant_columns(df)
+
+    assert len(issues) == 1
+    assert issues[0]["column"] == "Country"
+    assert issues[0]["issue_type"] == "constant_column"
+    assert issues[0]["count"] == 4
+    assert issues[0]["constant_value"] == "India"
+
+
+def test_detect_constant_numeric_column():
+    df = pd.DataFrame({
+        "Score": [10, 10, 10, 10],
+    })
+
+    issues = detect_constant_columns(df)
+
+    assert len(issues) == 1
+    assert issues[0]["constant_value"] == "10"
+
+
+def test_constant_column_with_missing_values():
+    df = pd.DataFrame({
+        "Status": ["Active", None, "Active", "Active"],
+    })
+
+    issues = detect_constant_columns(df)
+
+    assert len(issues) == 1
+    assert issues[0]["count"] == 3
+    assert issues[0]["percentage"] == 75.0
+
+
+def test_no_constant_columns():
+    df = pd.DataFrame({
+        "City": ["Kochi", "Trivandrum", "Kollam"],
+        "Score": [10, 20, 30],
+    })
+
+    assert detect_constant_columns(df) == []
+
+
+def test_all_missing_column_is_not_constant():
+    df = pd.DataFrame({
+        "Notes": [None, None, None],
+    })
+
+    assert detect_constant_columns(df) == []
+
+
+def test_constant_detection_rejects_invalid_inputs():
+    with pytest.raises(TypeError):
+        detect_constant_columns([1, 1, 1])
+
+    with pytest.raises(ValueError, match="empty dataset"):
+        detect_constant_columns(pd.DataFrame())
