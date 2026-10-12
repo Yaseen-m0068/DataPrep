@@ -102,3 +102,25 @@ def test_profile_includes_constant_column_issues():
     assert len(constant_issues) == 1
     assert constant_issues[0]["column"] == "Country"
     assert constant_issues[0]["constant_value"] == "India"
+
+def test_profile_includes_recommendations():
+    df = pd.DataFrame({
+        "Age": [21, None, 23, 24],
+        "Score": [10, 20, 30, 40],
+    })
+
+    profile = profile_dataset(df)
+
+    assert "quality_issues" in profile
+    assert "recommendations" in profile
+    assert len(profile["quality_issues"]) > 0
+    assert len(profile["recommendations"]) > 0
+
+    missing_recommendations = [
+        item
+        for item in profile["recommendations"]
+        if item["issue_type"] == "missing_values"
+    ]
+
+    assert len(missing_recommendations) == 1
+    assert missing_recommendations[0]["column"] == "Age"
