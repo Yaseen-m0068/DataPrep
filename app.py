@@ -6,6 +6,7 @@ from io import BytesIO
 from src.ingestion.loader import load_dataset
 from src.profiling.profile import profile_dataset
 from src.transformations.missing_values import handle_missing_values
+from src.transformations.duplicates import remove_duplicate_rows
 
 st.set_page_config(
     page_title="DataPrep | Data Quality Assistant",
@@ -232,6 +233,57 @@ if uploaded_file is not None:
                     st.session_state.pop("preprocessing_preview", None)
                     st.rerun()
 
+        # Duplicate-row preprocessing.
+        st.subheader("Duplicate-Row Preprocessing")
+
+        duplicate_count = int(df.duplicated().sum())
+
+        if duplicate_count == 0:
+            st.success("No exact duplicate rows found.")
+            st.session_state.pop("duplicate_preview", None)
+        else:
+            st.info(
+                f"Found {duplicate_count} exact duplicate row(s). "
+                "The first occurrence of each row will be preserved."
+            )
+
+            if st.button("Preview duplicate removal"):
+                preview_df = remove_duplicate_rows(df)
+
+                st.session_state["duplicate_preview"] = {
+                    "data": preview_df,
+                    "source_rows": len(df),
+                }
+
+            duplicate_preview = st.session_state.get("duplicate_preview")
+
+            if (
+                duplicate_preview is not None
+                and duplicate_preview["source_rows"] == len(df)
+            ):
+                preview_df = duplicate_preview["data"]
+
+                st.write("Preview after removing duplicate rows")
+                st.dataframe(
+                    preview_df.head(10),
+                    use_container_width=True,
+                )
+
+                preview_col1, preview_col2 = st.columns(2)
+                preview_col1.metric("Current Rows", len(df))
+                preview_col2.metric(
+                    "Rows After Removal",
+                    len(preview_df),
+                    delta=len(preview_df) - len(df),
+                )
+
+                if st.button("Apply duplicate removal"):
+                    st.session_state["cleaned_data"] = (
+                        preview_df.copy(deep=True)
+                    )
+                    st.session_state.pop("duplicate_preview", None)
+                    st.session_state.pop("preprocessing_preview", None)
+                    st.rerun()
 
         # Original versus current working dataset.
         st.subheader("Original vs Cleaned Dataset")
