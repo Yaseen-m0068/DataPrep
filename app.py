@@ -2,6 +2,7 @@
 import streamlit as st
 import pandas as pd
 import hashlib
+from io import BytesIO
 from src.ingestion.loader import load_dataset
 from src.profiling.profile import profile_dataset
 from src.transformations.missing_values import handle_missing_values
@@ -231,6 +232,7 @@ if uploaded_file is not None:
                     st.session_state.pop("preprocessing_preview", None)
                     st.rerun()
 
+
         # Original versus current working dataset.
         st.subheader("Original vs Cleaned Dataset")
 
@@ -259,6 +261,55 @@ if uploaded_file is not None:
         st.write("Current working dataset")
         st.dataframe(df.head(10), use_container_width=True)
 
+        # Export the current cleaned dataset.
+        st.subheader("Export Cleaned Dataset")
+
+        if df.empty:
+            st.warning(
+                "The current dataset has no rows to export. "
+                "Reset the dataset or review your transformations."
+            )
+        else:
+            csv_data = df.to_csv(index=False).encode("utf-8")
+
+            excel_buffer = BytesIO()
+
+            with pd.ExcelWriter(
+                excel_buffer,
+                engine="openpyxl",
+            ) as writer:
+                df.to_excel(
+                    writer,
+                    index=False,
+                    sheet_name="Cleaned Data",
+                )
+
+            excel_data = excel_buffer.getvalue()
+
+            export_col1, export_col2 = st.columns(2)
+
+            with export_col1:
+                st.download_button(
+                    label="Download as CSV",
+                    data=csv_data,
+                    file_name="cleaned_dataset.csv",
+                    mime="text/csv",
+                    use_container_width=True,
+                )
+
+            with export_col2:
+                st.download_button(
+                    label="Download as Excel",
+                    data=excel_data,
+                    file_name="cleaned_dataset.xlsx",
+                    mime=(
+                        "application/vnd.openxmlformats-officedocument."
+                        "spreadsheetml.sheet"
+                    ),
+                    use_container_width=True,
+                )
+
+        # Reset the working dataset.
         if st.button("Reset to Original Dataset"):
             st.session_state["cleaned_data"] = original_df.copy(deep=True)
             st.session_state.pop("preprocessing_preview", None)
