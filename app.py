@@ -7,6 +7,7 @@ from src.ingestion.loader import load_dataset
 from src.profiling.profile import profile_dataset
 from src.transformations.missing_values import handle_missing_values
 from src.transformations.duplicates import remove_duplicate_rows
+from src.transformations.categories import standardize_categories
 
 st.set_page_config(
     page_title="DataPrep | Data Quality Assistant",
@@ -283,6 +284,101 @@ if uploaded_file is not None:
                     )
                     st.session_state.pop("duplicate_preview", None)
                     st.session_state.pop("preprocessing_preview", None)
+                    st.rerun()
+
+
+        # Inconsistent-category preprocessing.
+        st.subheader("Category Standardization")
+
+        text_columns = [
+            column
+            for column in df.columns
+            if (
+                pd.api.types.is_object_dtype(df[column].dtype)
+                or pd.api.types.is_string_dtype(df[column].dtype)
+                or isinstance(df[column].dtype, pd.CategoricalDtype)
+            )
+        ]
+
+        if not text_columns:
+            st.info("No text or categorical columns are available.")
+            st.session_state.pop("category_preview", None)
+        else:
+            category_column = st.selectbox(
+                "Choose a column to standardize",
+                text_columns,
+                key="category_column",
+            )
+
+            strip_whitespace = st.checkbox(
+                "Remove leading and trailing whitespace",
+                value=True,
+                key="category_strip_whitespace",
+            )
+
+            case_strategy = st.selectbox(
+                "Choose capitalization",
+                options=["preserve", "lower", "upper", "title"],
+                format_func=lambda value: {
+                    "preserve": "Preserve existing capitalization",
+                    "lower": "Convert to lowercase",
+                    "upper": "Convert to uppercase",
+                    "title": "Convert to title case",
+                }[value],
+                key="category_case_strategy",
+            )
+
+            if st.button("Preview category standardization"):
+                try:
+                    preview_df = standardize_categories(
+                        df,
+                        category_column,
+                        strip_whitespace=strip_whitespace,
+                        case_strategy=case_strategy,
+                    )
+
+                    st.session_state["category_preview"] = {
+                        "data": preview_df,
+                        "column": category_column,
+                        "strip_whitespace": strip_whitespace,
+                        "case_strategy": case_strategy,
+                    }
+                except (TypeError, ValueError) as exc:
+                    st.error(str(exc))
+
+            category_preview = st.session_state.get("category_preview")
+
+            if (
+                category_preview is not None
+                and category_preview["column"] == category_column
+                and category_preview["strip_whitespace"]
+                == strip_whitespace
+                and category_preview["case_strategy"] == case_strategy
+            ):
+                preview_df = category_preview["data"]
+
+                st.write("Preview of standardized categories")
+                st.dataframe(
+                    preview_df[[category_column]].head(10),
+                    use_container_width=True,
+                )
+
+                before_values = int(df[category_column].nunique(dropna=True))
+                after_values = int(
+                    preview_df[category_column].nunique(dropna=True)
+                )
+
+                metric1, metric2 = st.columns(2)
+                metric1.metric("Distinct values before", before_values)
+                metric2.metric("Distinct values after", after_values)
+
+                if st.button("Apply category standardization"):
+                    st.session_state["cleaned_data"] = (
+                        preview_df.copy(deep=True)
+                    )
+                    st.session_state.pop("category_preview", None)
+                    st.session_state.pop("preprocessing_preview", None)
+                    st.session_state.pop("duplicate_preview", None)
                     st.rerun()
 
         # Original versus current working dataset.
