@@ -1,8 +1,10 @@
 
 import streamlit as st
-
+import pandas as pd
+import hashlib
 from src.ingestion.loader import load_dataset
 from src.profiling.profile import profile_dataset
+from src.transformations.missing_values import handle_missing_values
 
 st.set_page_config(
     page_title="DataPrep | Data Quality Assistant",
@@ -25,27 +27,52 @@ uploaded_file = st.file_uploader(
 
 if uploaded_file is not None:
     try:
-        df = load_dataset(uploaded_file)
+        # Initialize or reset state when the uploaded file changes.
+        uploaded_bytes = uploaded_file.getvalue()
+        upload_fingerprint = hashlib.sha256(uploaded_bytes).hexdigest()
+
+        if (
+            st.session_state.get("upload_fingerprint")
+            != upload_fingerprint
+        ):
+            original_df = load_dataset(uploaded_file)
+
+            st.session_state["upload_fingerprint"] = upload_fingerprint
+            st.session_state["original_data"] = original_df.copy(deep=True)
+            st.session_state["cleaned_data"] = original_df.copy(deep=True)
+            st.session_state.pop("preprocessing_preview", None)
+
+        original_df = st.session_state["original_data"]
+        df = st.session_state["cleaned_data"]
+
+        # Profile the current working dataset.
         profile = profile_dataset(df)
 
         st.success("Dataset uploaded successfully!")
 
+        # Dataset summary.
         col1, col2, col3 = st.columns(3)
 
-        col1.metric("Rows", f"{df.shape[0]:,}")
+        col1.metric("Rows", f"{len(df):,}")
         col2.metric("Columns", f"{df.shape[1]:,}")
-        col3.metric("Missing Values", f"{int(df.isna().sum().sum()):,}")
+        col3.metric(
+            "Missing Values",
+            f"{int(df.isna().sum().sum()):,}",
+        )
 
-        st.subheader("Dataset Preview")
+        st.subheader("Current Working Dataset")
         st.dataframe(df.head(10), use_container_width=True)
 
+        # Column information.
         st.subheader("Column Information")
 
         column_info = df.dtypes.astype(str).rename("Data Type").to_frame()
         column_info["Missing Values"] = df.isna().sum()
         column_info["Unique Values"] = df.nunique()
 
+        st.dataframe(column_info, use_container_width=True)
 
+        # Data quality report.
         st.subheader("Data Quality Report")
 
         quality_issues = profile["quality_issues"]
@@ -74,6 +101,7 @@ if uploaded_file is not None:
                             f"{issue['percentage']}%"
                         )
 
+        # Recommended actions.
         st.subheader("Recommended Actions")
 
         recommendations = profile["recommendations"]
@@ -82,16 +110,159 @@ if uploaded_file is not None:
             st.info("No recommendations are available.")
         else:
             for recommendation in recommendations:
+                column = (
+                    recommendation.get("column") or "Entire dataset"
+                )
+
                 with st.expander(
-                    f"{recommendation['title']} — "
-                    f"{recommendation.get('column') or 'Entire dataset'}"
+                    f"{recommendation['title']} — {column}"
                 ):
                     st.write(recommendation["explanation"])
 
                     for action in recommendation["actions"]:
                         st.markdown(f"- {action}")
 
-        st.dataframe(column_info, use_container_width=True)
+        # Missing-value preprocessing.
+        st.subheader("Missing-Value Preprocessing")
+
+        missing_columns = [
+            column
+            for column in df.columns
+            if df[column].isna().any()
+        ]
+
+        if not missing_columns:
+            st.success("No missing values are available to clean.")
+        else:
+            selected_column = st.selectbox(
+                "Choose a column",
+                missing_columns,
+                key="missing_column",
+            )
+
+            if pd.api.types.is_numeric_dtype(df[selected_column].dtype):
+                strategies = [
+                    "drop_rows",
+                    "fill_mean",
+                    "fill_median",
+                    "fill_mode",
+                ]
+            else:
+                strategies = ["drop_rows", "fill_mode"]
+
+            strategy_labels = {
+                "drop_rows": "Remove rows with missing values",
+                "fill_mean": "Fill with mean",
+                "fill_median": "Fill with median",
+                "fill_mode": "Fill with mode",
+            }
+
+            selected_strategy = st.selectbox(
+                "Choose a strategy",
+                strategies,
+                format_func=lambda value: strategy_labels[value],
+                key="missing_strategy",
+            )
+
+            explanations = {
+                "fill_mean": (
+                    "Mean imputation can be sensitive to extreme values."
+                ),
+                "fill_median": (
+                    "Median imputation is generally less sensitive "
+                    "to extreme values."
+                ),
+                "fill_mode": (
+                    "Mode imputation fills missing values with "
+                    "the most frequent observed value."
+                ),
+                "drop_rows": (
+                    "This removes rows where the selected column "
+                    "has missing values."
+                ),
+            }
+
+            st.caption(explanations[selected_strategy])
+
+            if st.button("Preview transformation"):
+                try:
+                    preview_df = handle_missing_values(
+                        df,
+                        selected_column,
+                        selected_strategy,
+                    )
+
+                    st.session_state["preprocessing_preview"] = {
+                        "data": preview_df,
+                        "column": selected_column,
+                        "strategy": selected_strategy,
+                    }
+                except (TypeError, ValueError) as exc:
+                    st.error(str(exc))
+
+            preview = st.session_state.get("preprocessing_preview")
+
+            if (
+                preview is not None
+                and preview["column"] == selected_column
+                and preview["strategy"] == selected_strategy
+            ):
+                preview_df = preview["data"]
+
+                st.write("Preview of transformed data")
+                st.dataframe(
+                    preview_df.head(10),
+                    use_container_width=True,
+                )
+
+                col1, col2, col3 = st.columns(3)
+
+                col1.metric("Current rows", len(df))
+                col2.metric("Preview rows", len(preview_df))
+                col3.metric(
+                    "Remaining missing values",
+                    int(preview_df[selected_column].isna().sum()),
+                )
+
+                if st.button("Apply transformation"):
+                    st.session_state["cleaned_data"] = (
+                        preview_df.copy(deep=True)
+                    )
+                    st.session_state.pop("preprocessing_preview", None)
+                    st.rerun()
+
+        # Original versus current working dataset.
+        st.subheader("Original vs Cleaned Dataset")
+
+        original_rows = len(original_df)
+        cleaned_rows = len(df)
+
+        original_missing = int(original_df.isna().sum().sum())
+        cleaned_missing = int(df.isna().sum().sum())
+
+        col1, col2, col3, col4 = st.columns(4)
+
+        col1.metric("Original Rows", original_rows)
+        col2.metric(
+            "Current Rows",
+            cleaned_rows,
+            delta=cleaned_rows - original_rows,
+        )
+        col3.metric("Original Missing Values", original_missing)
+        col4.metric(
+            "Current Missing Values",
+            cleaned_missing,
+            delta=cleaned_missing - original_missing,
+            delta_color="inverse",
+        )
+
+        st.write("Current working dataset")
+        st.dataframe(df.head(10), use_container_width=True)
+
+        if st.button("Reset to Original Dataset"):
+            st.session_state["cleaned_data"] = original_df.copy(deep=True)
+            st.session_state.pop("preprocessing_preview", None)
+            st.rerun()
 
     except (ValueError, OSError, ImportError) as exc:
-        st.error(f"Could not load the dataset: {exc}")
+        st.error(f"Could not process the dataset: {exc}")
