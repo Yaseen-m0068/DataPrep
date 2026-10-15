@@ -8,6 +8,7 @@ from src.profiling.profile import profile_dataset
 from src.transformations.missing_values import handle_missing_values
 from src.transformations.duplicates import remove_duplicate_rows
 from src.transformations.categories import standardize_categories
+from src.transformations.outliers import handle_numeric_outliers
 
 st.set_page_config(
     page_title="DataPrep | Data Quality Assistant",
@@ -43,7 +44,13 @@ if uploaded_file is not None:
             st.session_state["upload_fingerprint"] = upload_fingerprint
             st.session_state["original_data"] = original_df.copy(deep=True)
             st.session_state["cleaned_data"] = original_df.copy(deep=True)
-            st.session_state.pop("preprocessing_preview", None)
+            for preview_key in (
+                "preprocessing_preview",
+                "duplicate_preview",
+                "category_preview",
+                "outlier_preview",
+            ):
+                st.session_state.pop(preview_key, None)
 
         original_df = st.session_state["original_data"]
         df = st.session_state["cleaned_data"]
@@ -231,6 +238,12 @@ if uploaded_file is not None:
                     st.session_state["cleaned_data"] = (
                         preview_df.copy(deep=True)
                     )
+                    for preview_key in (
+                        "duplicate_preview",
+                        "category_preview",
+                        "outlier_preview",
+                    ):
+                        st.session_state.pop(preview_key, None)
                     st.session_state.pop("preprocessing_preview", None)
                     st.rerun()
 
@@ -282,8 +295,13 @@ if uploaded_file is not None:
                     st.session_state["cleaned_data"] = (
                         preview_df.copy(deep=True)
                     )
+                    for preview_key in (
+                        "preprocessing_preview",
+                        "category_preview",
+                        "outlier_preview",
+                    ):
+                        st.session_state.pop(preview_key, None)
                     st.session_state.pop("duplicate_preview", None)
-                    st.session_state.pop("preprocessing_preview", None)
                     st.rerun()
 
 
@@ -376,9 +394,102 @@ if uploaded_file is not None:
                     st.session_state["cleaned_data"] = (
                         preview_df.copy(deep=True)
                     )
+                    for preview_key in (
+                        "preprocessing_preview",
+                        "duplicate_preview",
+                        "outlier_preview",
+                    ):
+                        st.session_state.pop(preview_key, None)
                     st.session_state.pop("category_preview", None)
-                    st.session_state.pop("preprocessing_preview", None)
-                    st.session_state.pop("duplicate_preview", None)
+                    st.rerun()
+
+        # Numeric outlier preprocessing.
+        st.subheader("Numeric Outlier Handling")
+
+        numeric_columns = [
+            column
+            for column in df.select_dtypes(include="number").columns
+            if df[column].notna().any()
+        ]
+
+        if not numeric_columns:
+            st.info("No numerical columns with observed values are available.")
+            st.session_state.pop("outlier_preview", None)
+        else:
+            outlier_column = st.selectbox(
+                "Select numerical column",
+                options=numeric_columns,
+                key="outlier_column",
+            )
+
+            outlier_strategy = st.selectbox(
+                "Choose outlier-handling strategy",
+                options=["cap_iqr", "drop_rows"],
+                format_func=lambda strategy: {
+                    "cap_iqr": "Cap outliers using IQR boundaries",
+                    "drop_rows": "Remove rows containing outliers",
+                }[strategy],
+                key="outlier_strategy",
+            )
+
+            if st.button("Preview outlier handling"):
+                try:
+                    preview_df = handle_numeric_outliers(
+                        df,
+                        outlier_column,
+                        outlier_strategy,
+                    )
+                    st.session_state["outlier_preview"] = {
+                        "data": preview_df,
+                        "column": outlier_column,
+                        "strategy": outlier_strategy,
+                        "source_rows": len(df),
+                    }
+                except (TypeError, ValueError) as exc:
+                    st.error(str(exc))
+                    st.session_state.pop("outlier_preview", None)
+
+            outlier_preview = st.session_state.get("outlier_preview")
+
+            if (
+                outlier_preview is not None
+                and outlier_preview["column"] == outlier_column
+                and outlier_preview["strategy"] == outlier_strategy
+                and outlier_preview["source_rows"] == len(df)
+            ):
+                preview_df = outlier_preview["data"]
+
+                st.write("Preview of the selected column")
+                st.dataframe(
+                    preview_df[[outlier_column]].head(10),
+                    use_container_width=True,
+                )
+
+                preview_col1, preview_col2 = st.columns(2)
+                preview_col1.metric("Rows before", len(df))
+                preview_col2.metric("Rows after", len(preview_df))
+
+                if outlier_strategy == "cap_iqr":
+                    changed_values = int(
+                        (
+                            df[outlier_column].notna()
+                            & df[outlier_column].ne(preview_df[outlier_column])
+                        ).sum()
+                    )
+                    st.write(f"Values capped: {changed_values}")
+                else:
+                    removed_rows = len(df) - len(preview_df)
+                    st.write(f"Rows to remove: {removed_rows}")
+
+                if st.button("Apply outlier handling"):
+                    st.session_state["cleaned_data"] = preview_df.copy(deep=True)
+                    for preview_key in (
+                        "preprocessing_preview",
+                        "duplicate_preview",
+                        "category_preview",
+                    ):
+                        st.session_state.pop(preview_key, None)
+                    st.session_state.pop("outlier_preview", None)
                     st.rerun()
 
         # Original versus current working dataset.
@@ -460,7 +571,13 @@ if uploaded_file is not None:
         # Reset the working dataset.
         if st.button("Reset to Original Dataset"):
             st.session_state["cleaned_data"] = original_df.copy(deep=True)
-            st.session_state.pop("preprocessing_preview", None)
+            for preview_key in (
+                "preprocessing_preview",
+                "duplicate_preview",
+                "category_preview",
+                "outlier_preview",
+            ):
+                st.session_state.pop(preview_key, None)
             st.rerun()
 
     except (ValueError, OSError, ImportError) as exc:
