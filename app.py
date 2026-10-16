@@ -10,6 +10,10 @@ from src.transformations.duplicates import remove_duplicate_rows
 from src.transformations.categories import standardize_categories
 from src.transformations.outliers import handle_numeric_outliers
 from src.pipeline.history import record_transformation
+from src.pipeline.undo_redo import (
+    undo_last_transformation,
+    redo_last_transformation,
+)
 
 st.set_page_config(
     page_title="DataPrep | Data Quality Assistant",
@@ -47,6 +51,8 @@ if uploaded_file is not None:
             st.session_state["cleaned_data"] = original_df.copy(deep=True)
             st.session_state["transformation_history"] = []
             st.session_state["transformation_snapshots"] = []
+            st.session_state["redo_history"] = []
+            st.session_state["redo_snapshots"] = []
             for preview_key in (
                 "preprocessing_preview",
                 "duplicate_preview",
@@ -57,6 +63,8 @@ if uploaded_file is not None:
 
         st.session_state.setdefault("transformation_history", [])
         st.session_state.setdefault("transformation_snapshots", [])
+        st.session_state.setdefault("redo_history", [])
+        st.session_state.setdefault("redo_snapshots", [])
         original_df = st.session_state["original_data"]
         df = st.session_state["cleaned_data"]
 
@@ -243,6 +251,8 @@ if uploaded_file is not None:
                     st.session_state["transformation_snapshots"].append(
                         st.session_state["cleaned_data"].copy(deep=True)
                     )
+                    st.session_state["redo_history"] = []
+                    st.session_state["redo_snapshots"] = []
                     st.session_state["transformation_history"] = (
                         record_transformation(
                             st.session_state["transformation_history"],
@@ -315,6 +325,8 @@ if uploaded_file is not None:
                     st.session_state["transformation_snapshots"].append(
                         st.session_state["cleaned_data"].copy(deep=True)
                     )
+                    st.session_state["redo_history"] = []
+                    st.session_state["redo_snapshots"] = []
                     st.session_state["transformation_history"] = (
                         record_transformation(
                             st.session_state["transformation_history"],
@@ -426,6 +438,8 @@ if uploaded_file is not None:
                     st.session_state["transformation_snapshots"].append(
                         st.session_state["cleaned_data"].copy(deep=True)
                     )
+                    st.session_state["redo_history"] = []
+                    st.session_state["redo_snapshots"] = []
                     st.session_state["transformation_history"] = (
                         record_transformation(
                             st.session_state["transformation_history"],
@@ -533,6 +547,8 @@ if uploaded_file is not None:
                     st.session_state["transformation_snapshots"].append(
                         st.session_state["cleaned_data"].copy(deep=True)
                     )
+                    st.session_state["redo_history"] = []
+                    st.session_state["redo_snapshots"] = []
                     st.session_state["transformation_history"] = (
                         record_transformation(
                             st.session_state["transformation_history"],
@@ -555,22 +571,48 @@ if uploaded_file is not None:
                     st.session_state.pop("outlier_preview", None)
                     st.rerun()
 
-        # Show the successfully applied transformations in order.
+        # Show applied transformations and provide undo/redo controls.
         st.subheader("Transformation History")
         transformation_history = st.session_state["transformation_history"]
 
         if transformation_history:
             history_df = pd.DataFrame(transformation_history)
             st.dataframe(history_df, use_container_width=True)
-            st.caption(
-                "Undo restores the dataset to the state immediately before "
-                "the most recently applied transformation."
-            )
-            if st.button("Undo Last Transformation"):
-                if st.session_state["transformation_snapshots"]:
-                    previous_df = st.session_state["transformation_snapshots"].pop()
-                    st.session_state["cleaned_data"] = previous_df
-                    st.session_state["transformation_history"].pop()
+        else:
+            st.info("No transformations applied yet.")
+
+        st.caption(
+            "Undo restores the previous dataset state. Redo reapplies the "
+            "most recently undone state. Applying a new transformation "
+            "after undo clears the redo history."
+        )
+
+        undo_col, redo_col = st.columns(2)
+        with undo_col:
+            if st.button(
+                "Undo Last Transformation",
+                disabled=not st.session_state["transformation_history"],
+            ):
+                try:
+                    result = undo_last_transformation(
+                        st.session_state["cleaned_data"],
+                        st.session_state["transformation_history"],
+                        st.session_state["transformation_snapshots"],
+                        st.session_state["redo_history"],
+                        st.session_state["redo_snapshots"],
+                    )
+                    (
+                        restored_df,
+                        history,
+                        snapshots,
+                        redo_history,
+                        redo_snapshots,
+                    ) = result
+                    st.session_state["cleaned_data"] = restored_df
+                    st.session_state["transformation_history"] = history
+                    st.session_state["transformation_snapshots"] = snapshots
+                    st.session_state["redo_history"] = redo_history
+                    st.session_state["redo_snapshots"] = redo_snapshots
                     for preview_key in (
                         "preprocessing_preview",
                         "duplicate_preview",
@@ -579,10 +621,44 @@ if uploaded_file is not None:
                     ):
                         st.session_state.pop(preview_key, None)
                     st.rerun()
-                else:
-                    st.error("No saved dataset state is available to undo.")
-        else:
-            st.info("No transformations applied yet.")
+                except ValueError as exc:
+                    st.error(str(exc))
+
+        with redo_col:
+            if st.button(
+                "Redo Last Transformation",
+                disabled=not st.session_state["redo_history"],
+            ):
+                try:
+                    result = redo_last_transformation(
+                        st.session_state["cleaned_data"],
+                        st.session_state["transformation_history"],
+                        st.session_state["transformation_snapshots"],
+                        st.session_state["redo_history"],
+                        st.session_state["redo_snapshots"],
+                    )
+                    (
+                        restored_df,
+                        history,
+                        snapshots,
+                        redo_history,
+                        redo_snapshots,
+                    ) = result
+                    st.session_state["cleaned_data"] = restored_df
+                    st.session_state["transformation_history"] = history
+                    st.session_state["transformation_snapshots"] = snapshots
+                    st.session_state["redo_history"] = redo_history
+                    st.session_state["redo_snapshots"] = redo_snapshots
+                    for preview_key in (
+                        "preprocessing_preview",
+                        "duplicate_preview",
+                        "category_preview",
+                        "outlier_preview",
+                    ):
+                        st.session_state.pop(preview_key, None)
+                    st.rerun()
+                except ValueError as exc:
+                    st.error(str(exc))
 
         # Original versus current working dataset.
         st.subheader("Original vs Cleaned Dataset")
@@ -665,6 +741,8 @@ if uploaded_file is not None:
             st.session_state["cleaned_data"] = original_df.copy(deep=True)
             st.session_state["transformation_history"] = []
             st.session_state["transformation_snapshots"] = []
+            st.session_state["redo_history"] = []
+            st.session_state["redo_snapshots"] = []
             for preview_key in (
                 "preprocessing_preview",
                 "duplicate_preview",
