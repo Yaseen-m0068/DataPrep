@@ -9,6 +9,7 @@ from src.transformations.missing_values import handle_missing_values
 from src.transformations.duplicates import remove_duplicate_rows
 from src.transformations.categories import standardize_categories
 from src.transformations.outliers import handle_numeric_outliers
+from src.pipeline.history import record_transformation
 
 st.set_page_config(
     page_title="DataPrep | Data Quality Assistant",
@@ -44,6 +45,8 @@ if uploaded_file is not None:
             st.session_state["upload_fingerprint"] = upload_fingerprint
             st.session_state["original_data"] = original_df.copy(deep=True)
             st.session_state["cleaned_data"] = original_df.copy(deep=True)
+            st.session_state["transformation_history"] = []
+            st.session_state["transformation_snapshots"] = []
             for preview_key in (
                 "preprocessing_preview",
                 "duplicate_preview",
@@ -52,6 +55,8 @@ if uploaded_file is not None:
             ):
                 st.session_state.pop(preview_key, None)
 
+        st.session_state.setdefault("transformation_history", [])
+        st.session_state.setdefault("transformation_snapshots", [])
         original_df = st.session_state["original_data"]
         df = st.session_state["cleaned_data"]
 
@@ -235,6 +240,21 @@ if uploaded_file is not None:
                 )
 
                 if st.button("Apply transformation"):
+                    st.session_state["transformation_snapshots"].append(
+                        st.session_state["cleaned_data"].copy(deep=True)
+                    )
+                    st.session_state["transformation_history"] = (
+                        record_transformation(
+                            st.session_state["transformation_history"],
+                            "handle_missing_values",
+                            {
+                                "column": selected_column,
+                                "strategy": selected_strategy,
+                            },
+                            rows_before=len(df),
+                            rows_after=len(preview_df),
+                        )
+                    )
                     st.session_state["cleaned_data"] = (
                         preview_df.copy(deep=True)
                     )
@@ -292,6 +312,18 @@ if uploaded_file is not None:
                 )
 
                 if st.button("Apply duplicate removal"):
+                    st.session_state["transformation_snapshots"].append(
+                        st.session_state["cleaned_data"].copy(deep=True)
+                    )
+                    st.session_state["transformation_history"] = (
+                        record_transformation(
+                            st.session_state["transformation_history"],
+                            "remove_duplicate_rows",
+                            {},
+                            rows_before=len(df),
+                            rows_after=len(preview_df),
+                        )
+                    )
                     st.session_state["cleaned_data"] = (
                         preview_df.copy(deep=True)
                     )
@@ -391,6 +423,22 @@ if uploaded_file is not None:
                 metric2.metric("Distinct values after", after_values)
 
                 if st.button("Apply category standardization"):
+                    st.session_state["transformation_snapshots"].append(
+                        st.session_state["cleaned_data"].copy(deep=True)
+                    )
+                    st.session_state["transformation_history"] = (
+                        record_transformation(
+                            st.session_state["transformation_history"],
+                            "standardize_categories",
+                            {
+                                "column": category_column,
+                                "strip_whitespace": strip_whitespace,
+                                "case_strategy": case_strategy,
+                            },
+                            rows_before=len(df),
+                            rows_after=len(preview_df),
+                        )
+                    )
                     st.session_state["cleaned_data"] = (
                         preview_df.copy(deep=True)
                     )
@@ -482,6 +530,21 @@ if uploaded_file is not None:
                     st.write(f"Rows to remove: {removed_rows}")
 
                 if st.button("Apply outlier handling"):
+                    st.session_state["transformation_snapshots"].append(
+                        st.session_state["cleaned_data"].copy(deep=True)
+                    )
+                    st.session_state["transformation_history"] = (
+                        record_transformation(
+                            st.session_state["transformation_history"],
+                            "handle_numeric_outliers",
+                            {
+                                "column": outlier_column,
+                                "strategy": outlier_strategy,
+                            },
+                            rows_before=len(df),
+                            rows_after=len(preview_df),
+                        )
+                    )
                     st.session_state["cleaned_data"] = preview_df.copy(deep=True)
                     for preview_key in (
                         "preprocessing_preview",
@@ -491,6 +554,35 @@ if uploaded_file is not None:
                         st.session_state.pop(preview_key, None)
                     st.session_state.pop("outlier_preview", None)
                     st.rerun()
+
+        # Show the successfully applied transformations in order.
+        st.subheader("Transformation History")
+        transformation_history = st.session_state["transformation_history"]
+
+        if transformation_history:
+            history_df = pd.DataFrame(transformation_history)
+            st.dataframe(history_df, use_container_width=True)
+            st.caption(
+                "Undo restores the dataset to the state immediately before "
+                "the most recently applied transformation."
+            )
+            if st.button("Undo Last Transformation"):
+                if st.session_state["transformation_snapshots"]:
+                    previous_df = st.session_state["transformation_snapshots"].pop()
+                    st.session_state["cleaned_data"] = previous_df
+                    st.session_state["transformation_history"].pop()
+                    for preview_key in (
+                        "preprocessing_preview",
+                        "duplicate_preview",
+                        "category_preview",
+                        "outlier_preview",
+                    ):
+                        st.session_state.pop(preview_key, None)
+                    st.rerun()
+                else:
+                    st.error("No saved dataset state is available to undo.")
+        else:
+            st.info("No transformations applied yet.")
 
         # Original versus current working dataset.
         st.subheader("Original vs Cleaned Dataset")
@@ -571,6 +663,8 @@ if uploaded_file is not None:
         # Reset the working dataset.
         if st.button("Reset to Original Dataset"):
             st.session_state["cleaned_data"] = original_df.copy(deep=True)
+            st.session_state["transformation_history"] = []
+            st.session_state["transformation_snapshots"] = []
             for preview_key in (
                 "preprocessing_preview",
                 "duplicate_preview",
