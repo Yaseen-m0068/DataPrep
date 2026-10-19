@@ -11,7 +11,7 @@ def undo_last_transformation(
     redo_history,
     redo_snapshots,
 ):
-    """Undo the latest transformation and save its state for redo."""
+    #Undo the latest transformation and save its state for redo.
     if not history:
         raise ValueError("No transformation available to undo.")
 
@@ -52,7 +52,7 @@ def redo_last_transformation(
     redo_history,
     redo_snapshots,
 ):
-    """Redo the most recently undone transformation."""
+    #Redo the most recently undone transformation.
     if not redo_history or not redo_snapshots:
         raise ValueError("No transformation available to redo.")
 

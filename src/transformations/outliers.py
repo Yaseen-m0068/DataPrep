@@ -9,7 +9,7 @@ def handle_numeric_outliers(
     column: str,
     strategy: str,
 ) -> pd.DataFrame:
-    """Handle numeric outliers using IQR capping or row removal."""
+    #Handle numeric outliers using IQR capping or row removal.
     if not isinstance(df, pd.DataFrame):
         raise TypeError("Input must be a pandas DataFrame.")
 

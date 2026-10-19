@@ -9,6 +9,7 @@ from src.transformations.missing_values import handle_missing_values
 from src.transformations.duplicates import remove_duplicate_rows
 from src.transformations.categories import standardize_categories
 from src.transformations.outliers import handle_numeric_outliers
+from src.transformations.scaling import scale_numeric_columns
 from src.pipeline.history import record_transformation
 from src.pipeline.undo_redo import (
     undo_last_transformation,
@@ -58,6 +59,7 @@ if uploaded_file is not None:
                 "duplicate_preview",
                 "category_preview",
                 "outlier_preview",
+                "scaling_preview",
             ):
                 st.session_state.pop(preview_key, None)
 
@@ -90,58 +92,144 @@ if uploaded_file is not None:
         st.subheader("Column Information")
 
         column_info = df.dtypes.astype(str).rename("Data Type").to_frame()
-        column_info["Missing Values"] = df.isna().sum()
-        column_info["Unique Values"] = df.nunique()
+        column_info["Unique Values"] = df.nunique(dropna=True)
 
         st.dataframe(column_info, use_container_width=True)
 
-        # Data quality report.
+        # Data quality report: group repeated issues by category.
         st.subheader("Data Quality Report")
 
         quality_issues = profile["quality_issues"]
+        missing_issues = [
+            issue for issue in quality_issues
+            if issue["issue_type"] == "missing_values"
+        ]
+        outlier_issues = [
+            issue for issue in quality_issues
+            if issue["issue_type"] == "numeric_outliers"
+        ]
+        grouped_issue_types = {"missing_values", "numeric_outliers"}
+        other_issues = [
+            issue for issue in quality_issues
+            if issue["issue_type"] not in grouped_issue_types
+        ]
 
         if not quality_issues:
             st.success("No quality issues were detected.")
         else:
-            st.write(f"Detected {len(quality_issues)} quality issues.")
+            st.write(f"Detected {len(quality_issues)} quality issue(s).")
 
-            for issue in quality_issues:
-                severity = issue.get("severity", "low").upper()
-                column = issue.get("column") or "Entire dataset"
-
-                with st.expander(
-                    f"{issue['issue_type'].replace('_', ' ').title()} "
-                    f"— {column} [{severity}]"
-                ):
-                    st.write(issue["description"])
-
-                    if "count" in issue:
-                        st.write(f"Affected count: {issue['count']}")
-
-                    if "percentage" in issue:
-                        st.write(
-                            f"Affected percentage: "
-                            f"{issue['percentage']}%"
-                        )
-
-        # Recommended actions.
-        st.subheader("Recommended Actions")
-
-        recommendations = profile["recommendations"]
-
-        if not recommendations:
-            st.info("No recommendations are available.")
-        else:
-            for recommendation in recommendations:
-                column = (
-                    recommendation.get("column") or "Entire dataset"
+            if missing_issues:
+                st.markdown("#### Missing Values")
+                missing_table = pd.DataFrame([
+                    {
+                        "Column": issue["column"],
+                        "Missing Values": issue["count"],
+                        "Missing (%)": issue["percentage"],
+                        "Severity": issue.get("severity", "low").title(),
+                    }
+                    for issue in missing_issues
+                ])
+                st.dataframe(missing_table, use_container_width=True)
+                st.caption(
+                    f"{len(missing_issues)} column(s) affected · "
+                    f"{sum(issue['count'] for issue in missing_issues):,} "
+                    "missing cell(s) in total."
                 )
 
-                with st.expander(
-                    f"{recommendation['title']} — {column}"
-                ):
-                    st.write(recommendation["explanation"])
+            if outlier_issues:
+                st.markdown("#### Numeric Outliers")
+                outlier_table = pd.DataFrame([
+                    {
+                        "Column": issue["column"],
+                        "Outlier Count": issue["count"],
+                        "Outliers (%)": issue["percentage"],
+                        "Lower Bound": issue.get("lower_bound"),
+                        "Upper Bound": issue.get("upper_bound"),
+                        "Example Values": ", ".join(
+                            repr(value)
+                            for value in issue.get("outlier_values", [])[:5]
+                        ),
+                        "Method": issue.get("method", "IQR"),
+                    }
+                    for issue in outlier_issues
+                ])
+                st.dataframe(outlier_table, use_container_width=True)
+                st.caption(
+                    f"{len(outlier_issues)} numeric column(s) contain "
+                    "potential outliers. Example Values shows up to five "
+                    "flagged values per column."
+                )
 
+            # Keep other existing issue categories visible.
+            if other_issues:
+                st.markdown("#### Other Issues")
+                for issue in other_issues:
+                    severity = issue.get("severity", "low").upper()
+                    column = issue.get("column") or "Entire dataset"
+
+                    with st.expander(
+                        f"{issue['issue_type'].replace('_', ' ').title()} "
+                        f"— {column} [{severity}]"
+                    ):
+                        st.write(issue["description"])
+                        if "count" in issue:
+                            st.write(f"Affected count: {issue['count']}")
+                        if "percentage" in issue:
+                            st.write(
+                                f"Affected percentage: "
+                                f"{issue['percentage']}%"
+                            )
+                        if "variants" in issue:
+                            st.write("Category variants:")
+                            st.json(issue["variants"])
+                        if "constant_value" in issue:
+                            st.write(
+                                f"Constant value: {issue['constant_value']}"
+                            )
+
+        # Show one recommendation per relevant issue category.
+        # This section is hidden when neither missing values nor outliers exist.
+        relevant_issue_types = {"missing_values", "numeric_outliers"}
+        relevant_issues = [
+            issue for issue in quality_issues
+            if issue["issue_type"] in relevant_issue_types
+        ]
+
+        if relevant_issues:
+            st.subheader("Recommended Actions")
+            recommendations = profile["recommendations"]
+
+            for issue_type, heading in (
+                ("missing_values", "Handle Missing Values"),
+                ("numeric_outliers", "Review Numeric Outliers"),
+            ):
+                category_issues = [
+                    issue for issue in relevant_issues
+                    if issue["issue_type"] == issue_type
+                ]
+                if not category_issues:
+                    continue
+
+                category_recommendations = [
+                    recommendation for recommendation in recommendations
+                    if recommendation["issue_type"] == issue_type
+                ]
+                if not category_recommendations:
+                    continue
+
+                recommendation = category_recommendations[0]
+                affected_columns = [
+                    issue["column"] for issue in category_issues
+                    if issue.get("column") is not None
+                ]
+
+                with st.expander(heading, expanded=True):
+                    st.write(recommendation["explanation"])
+                    st.write(
+                        "**Affected columns:** "
+                        + ", ".join(affected_columns)
+                    )
                     for action in recommendation["actions"]:
                         st.markdown(f"- {action}")
 
@@ -272,6 +360,7 @@ if uploaded_file is not None:
                         "duplicate_preview",
                         "category_preview",
                         "outlier_preview",
+                        "scaling_preview",
                     ):
                         st.session_state.pop(preview_key, None)
                     st.session_state.pop("preprocessing_preview", None)
@@ -343,6 +432,7 @@ if uploaded_file is not None:
                         "preprocessing_preview",
                         "category_preview",
                         "outlier_preview",
+                        "scaling_preview",
                     ):
                         st.session_state.pop(preview_key, None)
                     st.session_state.pop("duplicate_preview", None)
@@ -352,19 +442,44 @@ if uploaded_file is not None:
         # Inconsistent-category preprocessing.
         st.subheader("Category Standardization")
 
-        text_columns = [
-            column
-            for column in df.columns
-            if (
+        # Offer only categorical text columns, excluding date-like values,
+        # identifiers, free text, and columns already standardized in the
+        # current transformation history. Undo/redo updates this list because
+        # history changes together with the dataset snapshots.
+        categorical_candidates = []
+        for column in df.columns:
+            is_text_or_category = (
                 pd.api.types.is_object_dtype(df[column].dtype)
                 or pd.api.types.is_string_dtype(df[column].dtype)
                 or isinstance(df[column].dtype, pd.CategoricalDtype)
             )
+            semantic_type = profile["columns"][str(column)]["semantic_type"]
+            if is_text_or_category and semantic_type in {
+                "categorical", "boolean_candidate"
+            }:
+                categorical_candidates.append(column)
+
+        standardized_columns = {
+            record.get("parameters", {}).get("column")
+            for record in st.session_state["transformation_history"]
+            if record.get("operation") == "standardize_categories"
+        }
+        text_columns = [
+            column for column in categorical_candidates
+            if column not in standardized_columns
         ]
 
+        # Clear stale widget state when an applied transformation removes
+        # its column from the options. Undo restores it; redo removes it again.
+        if st.session_state.get("category_column") not in text_columns:
+            st.session_state.pop("category_column", None)
+
         if not text_columns:
-            st.info("No text or categorical columns are available.")
             st.session_state.pop("category_preview", None)
+            if categorical_candidates:
+                st.success("All categorical columns are standardized.")
+            else:
+                st.info("No categorical columns are available for standardization.")
         else:
             category_column = st.selectbox(
                 "Choose a column to standardize",
@@ -460,6 +575,7 @@ if uploaded_file is not None:
                         "preprocessing_preview",
                         "duplicate_preview",
                         "outlier_preview",
+                        "scaling_preview",
                     ):
                         st.session_state.pop(preview_key, None)
                     st.session_state.pop("category_preview", None)
@@ -468,18 +584,30 @@ if uploaded_file is not None:
         # Numeric outlier preprocessing.
         st.subheader("Numeric Outlier Handling")
 
+        # Only show numeric columns currently flagged by the IQR outlier
+        # detector. Re-profiling on each rerun removes a column from the list
+        # after its outliers have been capped or its rows removed.
+        detected_outlier_names = {
+            issue["column"]
+            for issue in quality_issues
+            if issue["issue_type"] == "numeric_outliers"
+        }
         numeric_columns = [
             column
             for column in df.select_dtypes(include="number").columns
             if df[column].notna().any()
+            and str(column) in detected_outlier_names
         ]
 
+        if st.session_state.get("outlier_column") not in numeric_columns:
+            st.session_state.pop("outlier_column", None)
+
         if not numeric_columns:
-            st.info("No numerical columns with observed values are available.")
             st.session_state.pop("outlier_preview", None)
+            st.success("No outliers found.")
         else:
             outlier_column = st.selectbox(
-                "Select numerical column",
+                "Select numerical column with detected outliers",
                 options=numeric_columns,
                 key="outlier_column",
             )
@@ -566,9 +694,107 @@ if uploaded_file is not None:
                         "preprocessing_preview",
                         "duplicate_preview",
                         "category_preview",
+                        "scaling_preview",
                     ):
                         st.session_state.pop(preview_key, None)
                     st.session_state.pop("outlier_preview", None)
+                    st.rerun()
+
+        # Numeric scaling workflow.
+        st.subheader("Numerical Feature Scaling")
+        st.caption(
+            "Scale selected numerical measurements before machine learning. "
+            "Scaling changes values and units; it does not remove outliers."
+        )
+
+        scaling_columns = [
+            column
+            for column in df.select_dtypes(include="number").columns
+            if not pd.api.types.is_bool_dtype(df[column].dtype)
+            and df[column].notna().any()
+        ]
+
+        if not scaling_columns:
+            st.info("No numerical columns with observed values are available to scale.")
+            st.session_state.pop("scaling_preview", None)
+        else:
+            selected_scaling_columns = st.multiselect(
+                "Select numerical columns to scale",
+                options=scaling_columns,
+                key="scaling_columns",
+                help="Choose only measurement/features you want to scale. Avoid IDs and target labels unless scaling them is intentional.",
+            )
+            scaling_strategy = st.selectbox(
+                "Choose a scaling method",
+                options=["standard", "minmax"],
+                format_func=lambda value: {
+                    "standard": "Standardization (mean 0, standard deviation 1)",
+                    "minmax": "Min-Max Scaling (range 0 to 1)",
+                }[value],
+                key="scaling_strategy",
+            )
+
+            if st.button("Preview numerical scaling"):
+                try:
+                    preview_df = scale_numeric_columns(
+                        df,
+                        selected_scaling_columns,
+                        strategy=scaling_strategy,
+                    )
+                    st.session_state["scaling_preview"] = {
+                        "data": preview_df,
+                        "columns": list(selected_scaling_columns),
+                        "strategy": scaling_strategy,
+                        "source_rows": len(df),
+                    }
+                except (TypeError, ValueError) as exc:
+                    st.error(str(exc))
+                    st.session_state.pop("scaling_preview", None)
+
+            scaling_preview = st.session_state.get("scaling_preview")
+            if (
+                scaling_preview is not None
+                and scaling_preview["columns"] == list(selected_scaling_columns)
+                and scaling_preview["strategy"] == scaling_strategy
+                and scaling_preview["source_rows"] == len(df)
+            ):
+                preview_df = scaling_preview["data"]
+                st.write("Preview of scaled numerical columns")
+                st.dataframe(
+                    preview_df[selected_scaling_columns].head(10),
+                    use_container_width=True,
+                )
+                st.caption(
+                    "Missing values are preserved. Constant columns become 0. "
+                    "Only the selected columns are changed."
+                )
+
+                if st.button("Apply numerical scaling"):
+                    st.session_state["transformation_snapshots"].append(
+                        st.session_state["cleaned_data"].copy(deep=True)
+                    )
+                    st.session_state["redo_history"] = []
+                    st.session_state["redo_snapshots"] = []
+                    st.session_state["transformation_history"] = record_transformation(
+                        st.session_state["transformation_history"],
+                        "scale_numeric_columns",
+                        {
+                            "columns": list(selected_scaling_columns),
+                            "strategy": scaling_strategy,
+                        },
+                        rows_before=len(df),
+                        rows_after=len(preview_df),
+                    )
+                    st.session_state["cleaned_data"] = preview_df.copy(deep=True)
+                    for preview_key in (
+                        "preprocessing_preview",
+                        "duplicate_preview",
+                        "category_preview",
+                        "outlier_preview",
+                        "scaling_preview",
+                    ):
+                        st.session_state.pop(preview_key, None)
+                    st.session_state.pop("scaling_preview", None)
                     st.rerun()
 
         # Show applied transformations and provide undo/redo controls.
@@ -618,6 +844,7 @@ if uploaded_file is not None:
                         "duplicate_preview",
                         "category_preview",
                         "outlier_preview",
+                        "scaling_preview",
                     ):
                         st.session_state.pop(preview_key, None)
                     st.rerun()
@@ -654,6 +881,7 @@ if uploaded_file is not None:
                         "duplicate_preview",
                         "category_preview",
                         "outlier_preview",
+                        "scaling_preview",
                     ):
                         st.session_state.pop(preview_key, None)
                     st.rerun()
@@ -748,6 +976,7 @@ if uploaded_file is not None:
                 "duplicate_preview",
                 "category_preview",
                 "outlier_preview",
+                "scaling_preview",
             ):
                 st.session_state.pop(preview_key, None)
             st.rerun()
