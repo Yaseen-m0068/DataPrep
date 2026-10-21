@@ -54,3 +54,15 @@ def test_uploaded_file_with_unsupported_extension():
 
     with pytest.raises(ValueError, match="Unsupported file format"):
         load_dataset(uploaded_file)
+
+def test_load_uploaded_csv_with_cp1252_encoding():
+    uploaded_file = io.BytesIO(
+        "Name,City\nAndré,Montréal\n".encode("cp1252")
+    )
+    uploaded_file.name = "international.csv"
+
+    df = load_dataset(uploaded_file)
+
+    assert df.shape == (1, 2)
+    assert df["Name"].tolist() == ["André"]
+    assert df["City"].tolist() == ["Montréal"]

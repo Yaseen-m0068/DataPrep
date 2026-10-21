@@ -157,14 +157,19 @@ def detect_numeric_outliers(df: pd.DataFrame) -> list[dict]:
 
         semantic = infer_semantic_type(df[column], str(column))
 
-        # Avoid treating numeric identifiers as measurements.
+        # Do not treat numeric identifiers as measurements.
         if semantic["semantic_type"] == "identifier":
             continue
 
+        # Remove missing values before checking the column's characteristics.
         values = df[column].dropna()
 
         # Avoid unreliable IQR estimates on very small samples.
         if len(values) < 4:
+            continue
+        # Binary and low-cardinality numeric columns are not suitable
+        # candidates for conventional IQR outlier detection.
+        if values.nunique(dropna=True) <= 4:
             continue
 
         q1 = values.quantile(0.25)

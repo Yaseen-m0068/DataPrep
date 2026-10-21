@@ -265,3 +265,24 @@ def test_constant_detection_rejects_invalid_inputs():
 
     with pytest.raises(ValueError, match="empty dataset"):
         detect_constant_columns(pd.DataFrame())
+
+def test_numeric_outlier_detection_skips_binary_columns():
+    df = pd.DataFrame({
+        "booking_complete": [0] * 20 + [1] * 5,
+        "has_baggage": [0, 1] * 12 + [0],
+    })
+
+    issues = detect_numeric_outliers(df)
+
+    assert issues == []
+
+def test_numeric_outlier_detection_skips_low_cardinality_columns():
+    df = pd.DataFrame({
+        "rating": [
+            1, 1, 1, 1, 2, 2, 2, 3, 3, 4, 4, 4, 4, 4
+        ]
+    })
+
+    issues = detect_numeric_outliers(df)
+
+    assert issues == []

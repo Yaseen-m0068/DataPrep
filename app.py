@@ -10,6 +10,7 @@ from src.transformations.duplicates import remove_duplicate_rows
 from src.transformations.categories import standardize_categories
 from src.transformations.outliers import handle_numeric_outliers
 from src.transformations.scaling import scale_numeric_columns
+from src.detection.column_types import infer_semantic_type
 from src.pipeline.history import record_transformation
 from src.pipeline.undo_redo import (
     undo_last_transformation,
@@ -595,8 +596,11 @@ if uploaded_file is not None:
         numeric_columns = [
             column
             for column in df.select_dtypes(include="number").columns
-            if df[column].notna().any()
-            and str(column) in detected_outlier_names
+            if (not pd.api.types.is_bool_dtype(df[column].dtype)
+                and df[column].notna().any()
+                and df[column].nunique(dropna=True) > 4
+                and str(column) in detected_outlier_names
+            )
         ]
 
         if st.session_state.get("outlier_column") not in numeric_columns:
@@ -707,12 +711,29 @@ if uploaded_file is not None:
             "Scaling changes values and units; it does not remove outliers."
         )
 
-        scaling_columns = [
-            column
-            for column in df.select_dtypes(include="number").columns
-            if not pd.api.types.is_bool_dtype(df[column].dtype)
-            and df[column].notna().any()
-        ]
+        scaling_columns = []
+
+        for column in df.select_dtypes(include="number").columns:
+            series = df[column]
+
+            # Exclude Boolean columns.
+            if pd.api.types.is_bool_dtype(series.dtype):
+                continue
+
+            # Exclude columns containing only missing values.
+            if not series.notna().any():
+                continue
+
+            # Exclude binary numeric columns.
+            if series.nunique(dropna=True) <= 2:
+                continue
+
+            # Exclude columns identified as identifiers by semantic inference.
+            semantic = infer_semantic_type(series, str(column))
+            if semantic["semantic_type"] == "identifier":
+                continue
+
+            scaling_columns.append(column)
 
         if not scaling_columns:
             st.info("No numerical columns with observed values are available to scale.")

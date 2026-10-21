@@ -1,14 +1,15 @@
-
 from pathlib import Path
 from typing import BinaryIO
 
 import pandas as pd
+
 
 SUPPORTED_FORMATS = {".csv", ".xlsx", ".parquet"}
 
 
 def load_dataset(file_path: str | Path | BinaryIO) -> pd.DataFrame:
     """Load a supported tabular dataset from a path or binary file object."""
+
     if isinstance(file_path, (str, Path)):
         path = Path(file_path)
 
@@ -18,6 +19,7 @@ def load_dataset(file_path: str | Path | BinaryIO) -> pd.DataFrame:
         suffix = path.suffix.lower()
         source = path
         source_name = path.name
+
     else:
         source = file_path
         source_name = getattr(file_path, "name", "")
@@ -39,9 +41,21 @@ def load_dataset(file_path: str | Path | BinaryIO) -> pd.DataFrame:
             source.seek(0)
 
         if suffix == ".csv":
-            return pd.read_csv(source)
+            try:
+                # First try UTF-8, including files with a UTF-8 BOM.
+                return pd.read_csv(source, encoding="utf-8-sig")
+
+            except UnicodeDecodeError:
+                # The first attempt may have consumed part of an upload.
+                if hasattr(source, "seek"):
+                    source.seek(0)
+
+                # Fallback for many CSV files exported using Windows encodings.
+                return pd.read_csv(source, encoding="cp1252")
+
         if suffix == ".xlsx":
             return pd.read_excel(source)
+
         if suffix == ".parquet":
             return pd.read_parquet(source)
 
@@ -49,6 +63,13 @@ def load_dataset(file_path: str | Path | BinaryIO) -> pd.DataFrame:
         raise ValueError(
             f"Could not parse dataset: {source_name}"
         ) from exc
+
+    except pd.errors.EmptyDataError as exc:
+        raise ValueError(
+            f"The CSV file is empty or contains no readable data: "
+            f"{source_name}"
+        ) from exc
+
     except (ImportError, OSError) as exc:
         raise ValueError(
             f"Could not load dataset {source_name}: {exc}"
