@@ -10,6 +10,7 @@ from src.transformations.duplicates import remove_duplicate_rows
 from src.transformations.categories import standardize_categories
 from src.transformations.outliers import handle_numeric_outliers
 from src.transformations.scaling import scale_numeric_columns
+from src.transformations.encoding import encode_categorical_columns
 from src.detection.column_types import infer_semantic_type
 from src.pipeline.history import record_transformation
 from src.pipeline.undo_redo import (
@@ -61,6 +62,7 @@ if uploaded_file is not None:
                 "category_preview",
                 "outlier_preview",
                 "scaling_preview",
+                "encoding_preview",
             ):
                 st.session_state.pop(preview_key, None)
 
@@ -362,6 +364,9 @@ if uploaded_file is not None:
                         "category_preview",
                         "outlier_preview",
                         "scaling_preview",
+                    "encoding_preview",
+                        "encoding_preview",
+                "encoding_preview",
                     ):
                         st.session_state.pop(preview_key, None)
                     st.session_state.pop("preprocessing_preview", None)
@@ -434,6 +439,9 @@ if uploaded_file is not None:
                         "category_preview",
                         "outlier_preview",
                         "scaling_preview",
+                    "encoding_preview",
+                        "encoding_preview",
+                "encoding_preview",
                     ):
                         st.session_state.pop(preview_key, None)
                     st.session_state.pop("duplicate_preview", None)
@@ -577,6 +585,9 @@ if uploaded_file is not None:
                         "duplicate_preview",
                         "outlier_preview",
                         "scaling_preview",
+                    "encoding_preview",
+                        "encoding_preview",
+                "encoding_preview",
                     ):
                         st.session_state.pop(preview_key, None)
                     st.session_state.pop("category_preview", None)
@@ -699,6 +710,9 @@ if uploaded_file is not None:
                         "duplicate_preview",
                         "category_preview",
                         "scaling_preview",
+                    "encoding_preview",
+                        "encoding_preview",
+                "encoding_preview",
                     ):
                         st.session_state.pop(preview_key, None)
                     st.session_state.pop("outlier_preview", None)
@@ -813,9 +827,205 @@ if uploaded_file is not None:
                         "category_preview",
                         "outlier_preview",
                         "scaling_preview",
+                    "encoding_preview",
+                        "encoding_preview",
+                "encoding_preview",
                     ):
                         st.session_state.pop(preview_key, None)
                     st.session_state.pop("scaling_preview", None)
+                    st.rerun()
+
+        # Categorical encoding workflow.
+        st.subheader("Categorical Feature Encoding")
+        st.caption(
+            "Convert categorical values into machine-learning-friendly "
+            "representations. Preview changes before applying them."
+        )
+
+        encoding_candidates = []
+        for column in df.columns:
+            series = df[column]
+            is_categorical = (
+                pd.api.types.is_object_dtype(series.dtype)
+                or pd.api.types.is_string_dtype(series.dtype)
+                or isinstance(series.dtype, pd.CategoricalDtype)
+                or pd.api.types.is_bool_dtype(series.dtype)
+            )
+            if is_categorical and series.notna().any():
+                encoding_candidates.append(column)
+
+        if not encoding_candidates:
+            st.info(
+                "No categorical columns with observed values are available to encode."
+            )
+            st.session_state.pop("encoding_preview", None)
+        else:
+            selected_encoding_columns = st.multiselect(
+                "Select categorical columns to encode",
+                options=encoding_candidates,
+                key="encoding_columns",
+                help=(
+                    "Select text, category, or Boolean columns. One-hot encoding "
+                    "creates indicator columns; ordinal encoding uses your explicit order."
+                ),
+            )
+
+            encoding_strategy = st.selectbox(
+                "Choose an encoding method",
+                options=["onehot", "ordinal"],
+                format_func=lambda value: {
+                    "onehot": "One-Hot Encoding",
+                    "ordinal": "Ordinal Encoding",
+                }[value],
+                key="encoding_strategy",
+            )
+
+            encoding_drop_first = False
+            encoding_include_missing = False
+            ordinal_mappings = {}
+            ordinal_mapping_error = None
+
+            if encoding_strategy == "onehot":
+                encoding_drop_first = st.checkbox(
+                    "Drop the first category for each selected column",
+                    value=False,
+                    key="encoding_drop_first",
+                    help=(
+                        "Can reduce redundant columns for some models. The omitted "
+                        "category is represented by all zeros."
+                    ),
+                )
+                encoding_include_missing = st.checkbox(
+                    "Create a separate indicator for missing values",
+                    value=False,
+                    key="encoding_include_missing",
+                    help=(
+                        "When unchecked, missing values produce all-zero category indicators."
+                    ),
+                )
+            else:
+                st.caption(
+                    "Enter each column's category order from lowest to highest. "
+                    "The first category maps to 0, the second to 1, and so on. "
+                    "Category values containing commas are not supported by this input."
+                )
+                for column in selected_encoding_columns:
+                    observed_categories = df[column].dropna().unique().tolist()
+                    display_lookup = {str(value): value for value in observed_categories}
+                    if len(display_lookup) != len(observed_categories):
+                        ordinal_mapping_error = (
+                            f"Column '{column}' has categories with ambiguous text "
+                            "representations. Use one-hot encoding for this column."
+                        )
+
+                    st.write(f"Ordinal order for **{column}**")
+                    category_order_text = st.text_input(
+                        f"Category order for {column} (comma-separated)",
+                        value=", ".join(str(value) for value in observed_categories),
+                        key=f"encoding_order_{column}",
+                        help=(
+                            "Edit the order explicitly. Values must match the displayed "
+                            "category text exactly."
+                        ),
+                    )
+                    tokens = [
+                        value.strip()
+                        for value in category_order_text.split(",")
+                        if value.strip()
+                    ]
+                    unknown_tokens = [
+                        token for token in tokens if token not in display_lookup
+                    ]
+                    if unknown_tokens:
+                        ordinal_mapping_error = (
+                            f"Unknown category text for '{column}': {unknown_tokens}"
+                        )
+                    ordinal_mappings[column] = [
+                        display_lookup[token]
+                        for token in tokens
+                        if token in display_lookup
+                    ]
+
+            if st.button("Preview categorical encoding"):
+                try:
+                    if not selected_encoding_columns:
+                        raise ValueError("Select at least one categorical column.")
+                    if ordinal_mapping_error:
+                        raise ValueError(ordinal_mapping_error)
+
+                    preview_df = encode_categorical_columns(
+                        df,
+                        selected_encoding_columns,
+                        strategy=encoding_strategy,
+                        ordinal_mappings=(
+                            ordinal_mappings if encoding_strategy == "ordinal" else None
+                        ),
+                        drop_first=encoding_drop_first,
+                        include_missing=encoding_include_missing,
+                    )
+                    st.session_state["encoding_preview"] = {
+                        "data": preview_df,
+                        "columns": list(selected_encoding_columns),
+                        "strategy": encoding_strategy,
+                        "drop_first": encoding_drop_first,
+                        "include_missing": encoding_include_missing,
+                        "ordinal_mappings": ordinal_mappings,
+                        "source_rows": len(df),
+                        "source_columns": list(df.columns),
+                    }
+                except (TypeError, ValueError) as exc:
+                    st.error(str(exc))
+                    st.session_state.pop("encoding_preview", None)
+
+            encoding_preview = st.session_state.get("encoding_preview")
+            if (
+                encoding_preview is not None
+                and encoding_preview["columns"] == list(selected_encoding_columns)
+                and encoding_preview["strategy"] == encoding_strategy
+                and encoding_preview["drop_first"] == encoding_drop_first
+                and encoding_preview["include_missing"] == encoding_include_missing
+                and encoding_preview["ordinal_mappings"] == ordinal_mappings
+                and encoding_preview["source_rows"] == len(df)
+                and encoding_preview["source_columns"] == list(df.columns)
+                and ordinal_mapping_error is None
+            ):
+                preview_df = encoding_preview["data"]
+                st.write("Preview of encoded data")
+                st.dataframe(preview_df.head(10), use_container_width=True)
+                st.caption(
+                    f"Rows: {len(df)} → {len(preview_df)} | "
+                    f"Columns: {len(df.columns)} → {len(preview_df.columns)}"
+                )
+
+                if st.button("Apply categorical encoding"):
+                    st.session_state["transformation_snapshots"].append(
+                        st.session_state["cleaned_data"].copy(deep=True)
+                    )
+                    st.session_state["redo_history"] = []
+                    st.session_state["redo_snapshots"] = []
+                    st.session_state["transformation_history"] = record_transformation(
+                        st.session_state["transformation_history"],
+                        "encode_categorical_columns",
+                        {
+                            "columns": list(selected_encoding_columns),
+                            "strategy": encoding_strategy,
+                            "drop_first": encoding_drop_first,
+                            "include_missing": encoding_include_missing,
+                            "ordinal_mappings": ordinal_mappings,
+                        },
+                        rows_before=len(df),
+                        rows_after=len(preview_df),
+                    )
+                    st.session_state["cleaned_data"] = preview_df.copy(deep=True)
+                    for preview_key in (
+                        "preprocessing_preview",
+                        "duplicate_preview",
+                        "category_preview",
+                        "outlier_preview",
+                        "scaling_preview",
+                        "encoding_preview",
+                    ):
+                        st.session_state.pop(preview_key, None)
                     st.rerun()
 
         # Show applied transformations and provide undo/redo controls.
@@ -866,6 +1076,9 @@ if uploaded_file is not None:
                         "category_preview",
                         "outlier_preview",
                         "scaling_preview",
+                    "encoding_preview",
+                        "encoding_preview",
+                "encoding_preview",
                     ):
                         st.session_state.pop(preview_key, None)
                     st.rerun()
@@ -903,6 +1116,9 @@ if uploaded_file is not None:
                         "category_preview",
                         "outlier_preview",
                         "scaling_preview",
+                    "encoding_preview",
+                        "encoding_preview",
+                "encoding_preview",
                     ):
                         st.session_state.pop(preview_key, None)
                     st.rerun()
@@ -998,6 +1214,7 @@ if uploaded_file is not None:
                 "category_preview",
                 "outlier_preview",
                 "scaling_preview",
+                "encoding_preview",
             ):
                 st.session_state.pop(preview_key, None)
             st.rerun()
